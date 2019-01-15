@@ -5,6 +5,8 @@
  *      Author: cryviem
  */
 
+#include <errno.h>
+
 #include "tsap/tsap.h"
 #include "tsap/tsap_srvr.h"
 #include "common/commonthing.h"
@@ -16,6 +18,7 @@ int16_t server_init(uint16_t port, uint16_t maxclnt)
 {
 	int ret, fdflags, socketid;
 	psrvrhdlr_t	psrvrhdlr;
+	struct sockaddr_in servaddr;
 	/*create socket*/
 	START_SEGMENT
 
@@ -132,6 +135,31 @@ int16_t server_init(uint16_t port, uint16_t maxclnt)
 
 void svrproc_checknewconnection(psrvrhdlr_t srvrhdlr)
 {
+	int ret;
+	struct sockaddr_in clientaddr;
+	while(1)
+	{
+		bzero(&clientaddr, sizeof(clientaddr));
+		ret = accept(srvrhdlr->socketid, (struct sockaddr *)&clientaddr, sizeof(clientaddr));
+		if(ret >= 0)
+		{
+			/*new connection*/
 
+		}
+		else
+		{
+			if (errno != EWOULDBLOCK && errno != EAGAIN)
+			{
+				/*system error*/
+				LOG("tsap: accept() got error: %s\n", strerror(errno));
+				break;
+			}
+			else
+			{
+				/* no any new connection, just wait*/
+				sleep(1);
+			}
+		}
+	}
 }
 
