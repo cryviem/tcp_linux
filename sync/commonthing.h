@@ -9,7 +9,7 @@
 #define SRC_COMMON_COMMONTHING_H_
 
 #define START_SEGMENT		do{
-#define END_SEGMENT		}while(false);
+#define END_SEGMENT		}while(0);
 
 #define EXIT_IF(con, action_on_exit)			\
 if(con)											\
