@@ -21,6 +21,7 @@
 
 void svrproc_checknewconnection(void);
 void svrproc_communicate(uint16_t* clindex);
+void svrproc_userif(void);
 
 static int16_t get_clientbox(void);
 static void force_allclientstop(void);
@@ -39,6 +40,9 @@ int16_t server_init(uint16_t port, 	connected_cb con_cb, disconnected_cb discon_
 	socketid = socket(AF_INET, SOCK_STREAM, 0);
 	EXIT_IF(socketid == -1, err = -1; LOG("tsap: socket create fail!\n"))
 
+	ret = 1;
+	ret = setsockopt(socketid, SOL_SOCKET, SO_REUSEADDR, &ret, sizeof(ret));
+
 	/*bind IP and PORT address*/
 	bzero(&servaddr, sizeof(servaddr));
 	servaddr.sin_family = AF_INET;
@@ -47,7 +51,6 @@ int16_t server_init(uint16_t port, 	connected_cb con_cb, disconnected_cb discon_
 
 	ret = bind(socketid, (struct sockaddr*)&servaddr, sizeof(servaddr));
 	EXIT_IF(ret, err = -1; LOG("tsap: socket bind fail!\n"))
-
 	/*turn socket file descriptor to non-blocking*/
 	fdflags = fcntl(socketid, F_GETFL, 0);
 	EXIT_IF(fdflags == -1, err = -1; LOG("tsap: fcntl get fail!\n"))
@@ -75,24 +78,32 @@ int16_t server_init(uint16_t port, 	connected_cb con_cb, disconnected_cb discon_
 	ret = thpool_add_work(s_hdlr.thpoolinst, (void*)svrproc_checknewconnection, NULL);
 	EXIT_IF(ret == -1, err = -1; LOG("tsap: thpool add work fail!\n"))
 
+	ret = thpool_add_work(s_hdlr.thpoolinst, (void*)svrproc_userif, NULL);
+	EXIT_IF(ret == -1, err = -1; LOG("tsap: thpool add work fail!\n"))
+
 	END_SEGMENT
 
 	if (err < 0)
 	{
 		/*got error, destroy section*/
-		thpool_pause(s_hdlr.thpoolinst);
-		thpool_destroy(s_hdlr.thpoolinst);
+		if (s_hdlr.thpoolinst != 0)
+		{
+			thpool_pause(s_hdlr.thpoolinst);
+			thpool_destroy(s_hdlr.thpoolinst);
+		}
+
 		if (socketid > -1)
 		{
 			close(socketid);
+			LOG("socket closed\n");
 		}
-
+		LOG("tsap: server init fail\n");
 		//call disconnected_cb with con_id invalid
 	}
 	else
 	{
 		/*success*/
-		LOG("tsap: server init success");
+		LOG("tsap: server init success\n");
 	}
 	return err;
 }
@@ -121,6 +132,7 @@ void svrproc_checknewconnection(void)
 			ret = accept(s_hdlr.socketid, (struct sockaddr *)&clientaddr, (socklen_t*)&clientaddr_len);
 			if(ret >= 0)
 			{
+				LOG("new connection id : %d\n", ret);
 				/*new connection*/
 				s_hdlr.clientlist[clientindx].con_id = ret;
 				s_hdlr.clientlist[clientindx].status = CLIENT_STS_READY;
@@ -141,10 +153,10 @@ void svrproc_checknewconnection(void)
 				else
 				{
 					/* no any new connection, just wait*/
-					sleep(1);
 				}
 			}
 		}
+		sleep(1);
 	}
 	/*close parent socket*/
 	close(s_hdlr.socketid);
@@ -152,8 +164,7 @@ void svrproc_checknewconnection(void)
 	s_hdlr.disconnectedcbFun(NULL, error_code);
 	/*clean up all tsap server memory*/
 	/* destroy threadpool*/
-	thpool_pause(s_hdlr.thpoolinst);
-	thpool_destroy(s_hdlr.thpoolinst);
+
 	/* good bye */
 }
 
@@ -161,10 +172,12 @@ void svrproc_communicate(uint16_t* clindex)
 {
 	clientbox_type* myclient;
 	uint32_t	error_code;
-	uint16_t	cnt, indx = (*clindex);
+	uint16_t	indx = (*clindex);
+	int16_t		cnt;
 	START_SEGMENT
 
-	EXIT_IF(indx >= MAX_CLIENT_SP, error_code = -1)
+	EXIT_IF(indx >= MAX_CLIENT_SP, error_code = -1; LOG("invalid indx"))
+	LOG("indx: %d\n", indx);
 	/*save client index for use*/
 	myclient = &s_hdlr.clientlist[indx];
 
@@ -172,7 +185,7 @@ void svrproc_communicate(uint16_t* clindex)
 	{
 		if (myclient->status == CLIENT_STS_READY)
 		{
-			cnt = recv(myclient->con_id, myclient->rxbuff, MAX_BUFFER_SIZE, 0);
+			cnt = recv(myclient->con_id, myclient->rxbuff, MAX_BUFFER_SIZE, MSG_DONTWAIT);
 			if (cnt == -1)
 			{
 				if (errno != EWOULDBLOCK && errno != EAGAIN)
@@ -184,7 +197,6 @@ void svrproc_communicate(uint16_t* clindex)
 				else
 				{
 					/* no any data yet, just wait*/
-					sleep(1);
 				}
 			}
 			else if (cnt == 0)
@@ -196,12 +208,12 @@ void svrproc_communicate(uint16_t* clindex)
 			{
 				/*got data, call receive call back*/
 				myclient->rxbuflen = cnt;
-				s_hdlr.receivedcbFun(&myclient->con_id, myclient->rxbuff, myclient->rxbuflen);
+				s_hdlr.receivedcbFun(&indx, myclient->rxbuff, myclient->rxbuflen);
 			}
 		}
 		else if (myclient->status == CLIENT_STS_TXREQ)
 		{
-			cnt = send(myclient->con_id, myclient->txbuff, myclient->txbuflen, 0);
+			cnt = send(myclient->con_id, myclient->txbuff, myclient->txbuflen, MSG_DONTWAIT);
 			if (cnt == -1)
 			{
 				if (errno != EWOULDBLOCK && errno != EAGAIN)
@@ -213,7 +225,8 @@ void svrproc_communicate(uint16_t* clindex)
 				else
 				{
 					/* send in process, just wait*/
-					sleep(1);
+					LOG("send wait for response\n");
+
 				}
 			}
 			else if (cnt >= 0)
@@ -223,12 +236,34 @@ void svrproc_communicate(uint16_t* clindex)
 			}
 
 		}
+		sleep(1);
 	}
 	END_SEGMENT
 
 	close(myclient->con_id);
 	LOG("tsap: client with index %d was closed\n", indx);
 	s_hdlr.disconnectedcbFun(&indx, error_code);
+}
+
+void svrproc_userif(void)
+{
+	char buf[10] = "";
+	int n;
+	while(1)
+	{
+		n= 0;
+		while ((buf[n++] = getchar()) != '\n') ;
+		if ((strncmp(buf, "exit", 4)) == 0)
+		{
+			break;
+		}
+	}
+	LOG("do shutdown server\n");
+	server_shutdown();
+
+	while(thpool_num_threads_working(s_hdlr.thpoolinst) > 1);
+	thpool_pause(s_hdlr.thpoolinst);
+	thpool_destroy(s_hdlr.thpoolinst);
 }
 
 void server_send(void* indx, void* buff, uint16_t len)
@@ -238,8 +273,7 @@ void server_send(void* indx, void* buff, uint16_t len)
 
 	START_SEGMENT
 	EXIT_IF(!len, LOG("tsap: len = 0!\n"))
-
-	EXIT_IF(l_indx < 0 && l_indx > MAX_CLIENT_SP, LOG("tsap: invalid con id index!\n"))
+	EXIT_IF( l_indx > MAX_CLIENT_SP, LOG("tsap: invalid con id index!\n"))
 	EXIT_IF(s_hdlr.clientlist[l_indx].status == CLIENT_STS_FREE, LOG("tsap: con id is not ready!\n"))
 	clientbx = &s_hdlr.clientlist[l_indx];
 
@@ -296,7 +330,7 @@ static threadpool	get_thpollinst(void)
 	static threadpool tmp = NULL;
 	if (tmp == NULL)
 	{
-		tmp = thpool_init((MAX_CLIENT_SP+1));
+		tmp = thpool_init((MAX_CLIENT_SP+2));
 	}
 
 	return tmp;

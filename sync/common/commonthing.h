@@ -18,6 +18,7 @@ if(con)											\
 	break;										\
 }
 
+#define do_nothing								;
 #define PRINTLOG
 
 #ifdef PRINTLOG
