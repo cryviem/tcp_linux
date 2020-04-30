@@ -5,8 +5,8 @@
  *      Author: cryviem
  */
 
-#include "../tsap/ss.h"
-#include "../common/commonthing.h"
+#include "ss.h"
+#include "commonthing.h"
 
 #define APP_MAX_SIZE		1024
 uint8_t app_sts = 0;

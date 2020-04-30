@@ -13,7 +13,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdint.h>
-#include "../thpool_lib/thpool.h"
+#include "thpool.h"
 
 #define MAX_BUFFER_SIZE				1024
 #define MAX_CLIENT_SP				10

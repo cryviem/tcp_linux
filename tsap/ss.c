@@ -15,8 +15,8 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include "../common/commonthing.h"
-#include "../thpool_lib/thpool.h"
+#include "commonthing.h"
+#include "thpool.h"
 #include "ss.h"
 
 void svrproc_checknewconnection(void);
